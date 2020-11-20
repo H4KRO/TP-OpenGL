@@ -7,22 +7,35 @@
 #include <semaphore.h>
 #include <errno.h>
 #include <GL/glut.h>
+#include <time.h>
+
+sem_t sem_generator;
 
 int x_fen = 800;
 int y_fen = 600;
 
-float x = -10;
-float y = 0;
-float z = -10;
+typedef struct Ball Ball;
+struct Ball {
+  float x;
+  float y;
+  float z;
+  double rayon;
+  double x_vector;
+  double y_vector;
+  float no_mat[4];
+  float mat_diffuse[4];
+};
 
-double rayon = .5;
+const int nOfBalls = 40;
+int ballCursor = 0;
+Ball balls[40];
+
+
 int slice = 10;
 int slacks = 10;
 
 double speed = .4;
-double x_vector = .08;
-double y_vector = .8;
-double g = 1.05;
+double g = 1.07;
 
 void display();
 
@@ -95,46 +108,86 @@ void display ()
   glLightfv(GL_LIGHT0, GL_SPECULAR, specular);
   glLightfv(GL_LIGHT0, GL_POSITION, g_lightPos);
   //Exemple de définition d’un matériau
-  float no_mat[] = {0.0f, 0.0f, 0.0f, 1.0f};
-  float mat_diffuse[] = {0.0f, 0.7f, 0.3f, 1.0f};
-  float mat_specular[] = {1.0f, 1.0f, 1.0f, 1.0f};
-  float low_shininess = 5.0f;
-  glMaterialfv(GL_FRONT, GL_AMBIENT, no_mat);
-  glMaterialfv(GL_FRONT, GL_DIFFUSE, mat_diffuse);
-  glMaterialfv(GL_FRONT, GL_SPECULAR, mat_specular);
-  glMaterialf(GL_FRONT, GL_SHININESS, low_shininess);
 
-  glPushMatrix(); // Sauvegarde de la matrice
+  for(int i = 0; i < nOfBalls; i++) {
+    float mat_diffuse[] = {0.0f, 0.7f, 0.3f, 1.0f};
+    float mat_specular[] = {1.0f, 1.0f, 1.0f, 1.0f};
+    float low_shininess = 5.0f;
+    glMaterialfv(GL_FRONT, GL_AMBIENT, balls[i].no_mat);
+    glMaterialfv(GL_FRONT, GL_DIFFUSE, balls[i].mat_diffuse);
+    glMaterialfv(GL_FRONT, GL_SPECULAR, mat_specular);
+    glMaterialf(GL_FRONT, GL_SHININESS, low_shininess);
 
-  glTranslatef(x, y, z); //on déplace la matrice en x y z
-  glutSolidSphere(rayon , slice , slacks); //on dessine une sphere
-
-  glPopMatrix(); //On revient à la matrice sauvegardée
+    glPushMatrix(); // Sauvegarde de la matrice
+    glTranslatef(balls[i].x, balls[i].y, balls[i].z); //on déplace la matrice en x y z
+    glutSolidSphere(balls[i].rayon , slice , slacks); //on dessine une sphere
+    glPopMatrix(); //On revient à la matrice sauvegardée
+  }
 
   glutSwapBuffers() ; // affiche à l’écran le buffer dans lequel nous avons dessiné
 }
 
 void *update_f() {
-  sleep(2);
   while(1 == 1){
-    x += x_vector * speed;
-    y += y_vector * speed;
-    if(y_vector > 0 && y_vector < 0.01){
-      y_vector = -y_vector;
-    }else if(y_vector > 0){
-      y_vector = y_vector / g;
-    }else if(y_vector < 0){
-      y_vector = y_vector * g;
+    for(int i = 0; i < nOfBalls; i++) {
+      balls[i].x += balls[i].x_vector * speed;
+      balls[i].y += balls[i].y_vector * speed;
+      if(balls[i].y_vector > 0 && balls[i].y_vector < 0.01){
+        balls[i].y_vector = -balls[i].y_vector;
+      }else if(balls[i].y_vector > 0){
+        balls[i].y_vector = balls[i].y_vector / g;
+      }else if(balls[i].y_vector < 0){
+        balls[i].y_vector = balls[i].y_vector * g;
+      }
+      balls[i].x_vector = balls[i].x_vector * .999 ;
+      if(balls[i].y < -8) {
+        balls[i].y_vector *= -1;
+      }
     }
-    x_vector = x_vector * .999 ;
-    if(y < 0) {
-      y_vector = -( y_vector * .6);
+    if(balls[0].x > 7) {
+      sem_post(&sem_generator);
     }
     usleep(15000);
   }
 }
 
+double randomFloat(float min, float max) {
+  double r = (double) rand() / (double) RAND_MAX;
+  return(min + r * (max - min));
+}
+
+void *thread_generator (void *arguments) {
+  while(1 == 1) {
+    sem_wait(&sem_generator);
+    balls[ballCursor].x = randomFloat(-20, -17);
+    balls[ballCursor].y = randomFloat(1, 5);
+    balls[ballCursor].z = randomFloat(-20, -15);
+    balls[ballCursor].rayon = randomFloat(.5, .8);
+    balls[ballCursor].x_vector = .12;
+    balls[ballCursor].y_vector = .7;
+    balls[ballCursor].no_mat[0] = randomFloat(0, 1);
+    balls[ballCursor].no_mat[1] = randomFloat(0, 1);
+    balls[ballCursor].no_mat[2] = randomFloat(0, 1);
+    balls[ballCursor].no_mat[3] = randomFloat(0, 1);
+    balls[ballCursor].mat_diffuse[0] = balls[ballCursor].no_mat[0];
+    balls[ballCursor].mat_diffuse[1] = balls[ballCursor].no_mat[1];
+    balls[ballCursor].mat_diffuse[2] = balls[ballCursor].no_mat[2];
+    balls[ballCursor].mat_diffuse[3] = balls[ballCursor].no_mat[3];
+    ballCursor += 1;
+    if(ballCursor >= nOfBalls) {
+      ballCursor = 0;
+    }
+    usleep(600000);
+  }
+}
+
 int main() {
+  srand( time( NULL ) );
+
+  sem_init(&sem_generator, 0, nOfBalls);
+  pthread_t generator;
+  pthread_create(&generator, NULL, thread_generator, NULL);
+
   pthread_t affiche;
   pthread_create(&affiche, NULL, thread_affichage, NULL);
   pthread_t update;
